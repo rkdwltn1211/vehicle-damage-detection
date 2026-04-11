@@ -16,10 +16,11 @@
 
 탁송 서비스에서 차량 인수·반납 시 발생하는 **손상 책임 분쟁**을 해결하기 위해 개발한 AI 기반 차량 흠집 탐지 시스템입니다.
 
-탁송 전·후 차량 이미지를 업로드하면 **EfficientNet-B0 CNN 모델**이 손상 여부와 심각도를 0~4단계로 자동 판정하고, 결과를 시각화하여 반환합니다.
+탁송 전·후 차량 이미지를 업로드하면 **EfficientNet-B0 CNN 모델**이 손상 여부와 심각도를 0~4단계로 자동 판정하고 결과를 시각화하여 반환합니다.
 
 > 🗓 **개발 기간**: 2026.01 – 2026.04  
-> 👤 **개발자**: 강지수 (개인 프로젝트 — 팀 프로젝트에서 담당한 파트를 독립 서비스로 고도화)
+> 👤 **개발자**: 강지수 — 팀 프로젝트 담당 파트를 FastAPI 서버 · AWS EC2 배포까지 독립 서비스로 고도화  
+> 🔗 원본 팀 프로젝트: [![GitHub](https://img.shields.io/badge/GitHub-vehicle--delivery--ai--system-181717?style=flat-square&logo=github&logoColor=white)](https://github.com/rkdwltn1211/vehicle-delivery-ai-system)
 
 ---
 
@@ -28,13 +29,15 @@
 ```
 사용자 (브라우저)
       │
-      │  이미지 업로드 (before / after)
+      │  before / after 이미지 업로드
       ▼
 FastAPI 백엔드 (main.py)
       │
-      ├─── EfficientNet-B0 CNN ──► 심각도 판정 (0~4)
+      ├── step1_prepare_data.py  OpenCV 파이프라인으로 ROI 패치 추출 + 데이터 증강
       │
-      └─── OpenCV 파이프라인 ──► 흠집 위치 시각화
+      ├── step2_train_cnn.py     EfficientNet-B0 Fine-tuning → best_model.pth
+      │
+      └── step3_pipeline.py     before/after CNN 심각도 비교 추론
       │
       ▼
 결과 반환 (JSON + 비교 이미지 base64)
@@ -47,43 +50,68 @@ FastAPI 백엔드 (main.py)
 
 ## 🧠 핵심 기술
 
-### ① CNN 모델 — 심각도 분류 (EfficientNet-B0)
+### Step 1 — 데이터 파이프라인 (`step1_prepare_data.py`)
 
-- ImageNet pretrained **EfficientNet-B0** Fine-tuning (Transfer Learning)
-- 클래스 불균형 대응: `CrossEntropyLoss` 클래스 가중치 적용
-- Early Stopping (patience=5) 적용
-- **val accuracy: 64%** (126쌍 소규모 데이터 기준)
-
-### ② 데이터 파이프라인 (OpenCV)
+before/after 이미지 쌍에서 OpenCV로 흠집 영역(ROI) 패치를 자동 추출하고 CNN 학습용 데이터셋을 구성합니다.
 
 ```
-before 이미지 + after 이미지
-        │
-        ▼
-① ECC 정렬          촬영 각도 차이 자동 보정
-        │
-        ▼
-② Canny 엣지 탐지   흠집 영역 마스크 생성
-        │
-        ▼
-③ Morphology 필터   노이즈 제거
-        │
-        ▼
-④ ROI 패치 추출     흠집 영역 크롭
-        │
-        ▼
-⑤ 데이터 증강       634개 → 4,190장
+before + after 이미지
+      │
+      ▼
+① ECC 정렬        촬영 각도 차이 자동 보정
+      │
+      ▼
+② CLAHE 명암 보정  조명 차이 제거
+      │
+      ▼
+③ Canny 엣지 탐지  흠집 영역 마스크 생성
+      │
+      ▼
+④ Morphology 필터  노이즈 제거
+      │
+      ▼
+⑤ ROI 패치 추출   흠집 영역 크롭 → CNN 입력
+      │
+      ▼
+⑥ 데이터 증강     634개 → 4,190장
+      (좌우반전 / 상하반전 / 회전±15° / 밝기조절 / 가우시안블러)
 ```
 
-### ③ 심각도 라벨링 체계 (직접 설계)
+- 패치 미감지 시 after 전체 이미지 사용 (누락 방지)
+- train 70% / val 30% 자동 분리
 
-| 단계 | 수준 | 기준 |
-|:---:|------|------|
-| **0** | 정상 | 신규 흠집 없음 |
-| **1** | 경미 | 얕은 스크래치, 멀리서 잘 안 보임 |
-| **2** | 보통 | 육안으로 명확, 도장 손상, 부분 도색 가능 |
-| **3** | 심각 | 넓거나 깊음, 찌그러짐, 수리 필요 |
-| **4** | 매우 심각 | 구조적 손상 수준, 즉시 수리·교체 필요 |
+---
+
+### Step 2 — CNN 학습 (`step2_train_cnn.py`)
+
+EfficientNet-B0를 Fine-tuning하여 흠집 심각도 분류 모델을 학습합니다.
+
+- **모델**: EfficientNet-B0 (ImageNet pretrained) — 마지막 분류기만 교체
+- **클래스 불균형 대응**: CrossEntropyLoss 클래스 가중치 적용
+- **옵티마이저**: AdamW + CosineAnnealingLR 스케줄러
+- **Early Stopping**: patience=5
+- **결과**: val accuracy **64%** (126쌍 소규모 데이터 기준)
+
+---
+
+### Step 3 — 추론 파이프라인 (`step3_pipeline.py`)
+
+before/after 이미지 쌍을 CNN에 넣어 심각도 변화를 비교하고 결과를 시각화합니다.
+
+- before는 정상(Lv.0) 고정, after만 CNN 판정
+- 6방향(front / rear / left / right / left_side / right_side) 각각 분석
+- 심각도 변화 패널 이미지 자동 생성 및 저장
+
+---
+
+### Step 4 — FastAPI 서버 (`main.py`)
+
+웹에서 이미지를 업로드하면 CNN 판정 결과를 JSON + 비교 이미지로 반환합니다.
+
+- `POST /analyze` : before/after 이미지 업로드 → 심각도 판정
+- `GET /health` : 서버 상태 확인
+- `GET /` : 프론트엔드(index.html) 서빙
+- 신뢰도 임계값(`CONFIDENCE_THRESHOLD=0.8`) 기반 손상 감지 판정
 
 ---
 
@@ -96,9 +124,15 @@ before 이미지 + after 이미지
 | 증강 후 | 4,190장 (train 2,900 / val 380) |
 | 증강 방법 | 좌우반전, 상하반전, 회전(±15°), 밝기조절, 가우시안블러 |
 
-| 심각도 | Score 0 | Score 1 | Score 2 | Score 3 | Score 4 |
-|:------:|:-------:|:-------:|:-------:|:-------:|:-------:|
-| 대수 | 46대 | 22대 | 23대 | 21대 | 14대 |
+### 심각도 라벨링 체계 (직접 설계)
+
+| 단계 | 수준 | 기준 |
+|:---:|------|------|
+| **0** | 정상 | 신규 흠집 없음 |
+| **1** | 경미 | 얕은 스크래치, 멀리서 잘 안 보임 |
+| **2** | 보통 | 육안으로 명확, 도장 손상, 부분 도색 가능 |
+| **3** | 심각 | 넓거나 깊음, 찌그러짐, 수리 필요 |
+| **4** | 매우 심각 | 구조적 손상 수준, 즉시 수리·교체 필요 |
 
 ---
 
@@ -133,7 +167,8 @@ before 이미지 + after 이미지
 | 백엔드 | FastAPI, Uvicorn |
 | 프론트엔드 | HTML / CSS / JavaScript |
 | 클라우드 | AWS EC2 (t3.micro, Ubuntu 22.04) |
-| 데이터 분석 | Pandas, NumPy |
+| 프로세스 관리 | systemd |
+| 데이터 분석 | Pandas, NumPy, scikit-learn |
 
 ---
 
@@ -141,12 +176,12 @@ before 이미지 + after 이미지
 
 ```
 vehicle-damage-detection/
-├── main.py                  # FastAPI 서버 (API 엔드포인트)
+├── main.py                  # FastAPI 서버
 ├── index.html               # 프론트엔드
 ├── labels.csv               # 심각도 라벨 (car_id, score)
-├── step1_prepare_data.py    # 데이터 준비 (OpenCV 파이프라인 + 증강)
-├── step2_train_cnn.py       # CNN 모델 학습 (EfficientNet-B0)
-├── step3_pipeline.py        # 추론 파이프라인
+├── step1_prepare_data.py    # OpenCV 데이터 파이프라인 + 증강
+├── step2_train_cnn.py       # EfficientNet-B0 학습
+├── step3_pipeline.py        # before/after 비교 추론
 ├── model/
 │   └── best_model.pth       # 학습된 CNN 모델
 └── README.md
@@ -166,7 +201,7 @@ python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 
 # 3. 의존성 설치
-pip install fastapi uvicorn torch torchvision opencv-python-headless pillow numpy python-multipart
+pip install fastapi uvicorn torch torchvision opencv-python-headless pillow numpy python-multipart scikit-learn pandas matplotlib
 
 # 4. 서버 실행
 uvicorn main:app --host 0.0.0.0 --port 8000
@@ -182,7 +217,7 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 |------|------|
 | 서버 | AWS EC2 t3.micro |
 | OS | Ubuntu Server 22.04 LTS |
-| 프로세스 관리 | systemd (서버 재시작 시 자동 실행) |
+| 프로세스 관리 | systemd (재시작 시 자동 실행) |
 | 포트 | 8000 |
 
 ---
@@ -192,16 +227,8 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 | 한계 | 개선 방향 |
 |------|----------|
 | val accuracy 64% — 126쌍 소규모 데이터 한계 | CarDD 등 공개 데이터셋 추가 결합 |
-| Score 3·4 F1 낮음 — 심각 케이스 데이터 부족 | 데이터 추가 수집 및 Focal Loss 적용 |
-| CNN과 OpenCV 파이프라인 미통합 | 단일 파이프라인으로 통합 예정 |
-
----
-
-## 🔗 관련 레포지토리
-
-이 프로젝트는 아래 팀 프로젝트에서 담당한 파트를 독립 서비스로 고도화한 것입니다.
-
-👉 [vehicle-delivery-ai-system](https://github.com/rkdwltn1211/vehicle-delivery-ai-system) — AI 기반 탁송 매칭 플랫폼 (4인 팀 프로젝트)
+| Score 3·4 F1 낮음 — 심각 케이스 데이터 부족 | 추가 수집 및 Focal Loss 적용 |
+| 흠집 위치 시각화 미구현 | OpenCV 바운딩 박스 파이프라인 통합 예정 |
 
 ---
 
