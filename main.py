@@ -131,15 +131,22 @@ def make_result_image(pil_before, pil_after, before_sev, after_sev, before_conf,
     diff = after_sev - before_sev
     change_y = 50 + IMG_H + 65
     if after_sev >= CHANGE_THRESHOLD and diff > 0 and after_conf >= CONFIDENCE_THRESHOLD:
-        change_text  = f"Severity INCREASED  +{diff} level"
+        change_text  = "Damage Alert Threshold Met"
         change_color = (80, 80, 240)
     else:
-        change_text  = "No Change Detected"
+        change_text  = "Damage Alert Threshold Not Met"
         change_color = (160, 160, 160)
 
     cv2.rectangle(panel, (MARGIN, change_y-26), (PANEL_W-MARGIN, change_y+8), (45,45,45), -1)
-    cv2.putText(panel, change_text, (PANEL_W//2-170, change_y),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.72, change_color, 2)
+    # Center the longer threshold message and keep it within the panel.
+    text_scale = 0.72
+    text_width = cv2.getTextSize(change_text, cv2.FONT_HERSHEY_SIMPLEX, text_scale, 2)[0][0]
+    max_text_width = PANEL_W - MARGIN * 2 - 24
+    if text_width > max_text_width:
+        text_scale *= max_text_width / text_width
+        text_width = cv2.getTextSize(change_text, cv2.FONT_HERSHEY_SIMPLEX, text_scale, 2)[0][0]
+    cv2.putText(panel, change_text, ((PANEL_W - text_width) // 2, change_y),
+                cv2.FONT_HERSHEY_SIMPLEX, text_scale, change_color, 2)
 
     # 심각도 바
     bar_y  = change_y + 40
