@@ -8,7 +8,15 @@ CarGuard는 차량 사진을 분석해 손상 심각도를 **Lv.0~Lv.4의 5단�
 
 **[🚀 CarGuard 서비스 체험하기](https://vehicle-damage-detection-sm5j.onrender.com)**
 
-`Python` `PyTorch` `EfficientNet-B0` `FastAPI` `OpenCV` `JavaScript` `Render`
+
+![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![PyTorch](https://img.shields.io/badge/PyTorch-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white)
+![EfficientNet--B0](https://img.shields.io/badge/EfficientNet--B0-4285F4?style=for-the-badge&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=for-the-badge&logo=fastapi&logoColor=white)
+![OpenCV](https://img.shields.io/badge/OpenCV-5C3EE8?style=for-the-badge&logo=opencv&logoColor=white)
+![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black)
+![Render](https://img.shields.io/badge/Render-000000?style=for-the-badge&logo=render&logoColor=white)
+
 
 > 현재 버전은 탁송 후 사진의 손상 심각도를 분류하는 데 초점을 맞추고 있습니다. 기존 손상과 신규 손상을 구분하는 전후 이미지 비교 기능은 향후 개선할 계획입니다.
 >
